@@ -1,10 +1,14 @@
 from flask import Flask, abort, request, render_template
-
 from auth import auth_slack
 from config import *
 from message import *
 
 app = Flask(__name__)
+
+
+def getNameById(_id):
+    profile=vk.users.get(user_ids=_id)
+    return profile[0]['first_name']+' '+profile[0]['last_name']
 
 
 @app.route('/')
@@ -15,16 +19,23 @@ def index():
 @app.route('/callback/xE4sA', methods=['GET', 'POST'])
 def callback():
     if not request.json or 'type' not in request.json:
-        abort(400)
+        abort(403)
 
     if request.json['type'] == 'confirmation':
+        print(confirmation_token_)
         return confirmation_token_
 
     if request.json['type'] == 'wall_post_new':
         post = request.json['object']
 
+        text=''
+
+        if post['post_type']=='suggest':
+            text+='new suggested post from '
+        else:
+            text+='new wallpost from '
         attachments = Slack(post=post).create_attachments()
-        Slack.send_message(auth=slack, channel=channel_, text=text_,
+        Slack.send_message(auth=slack, channel=channel_, text=text+getNameById(request.json['object']['created_by'])+'\npost id: '+str(post['id']),
                            attachments=attachments)
 
         return 'ok', 200
@@ -33,4 +44,4 @@ def callback():
 slack = auth_slack()
 
 if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=5000)
+    app.run()

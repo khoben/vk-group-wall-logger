@@ -33,19 +33,22 @@ class Slack(object):
         try:
             if post['copy_history']:
                 self.repost = Repost(post['copy_history'][0])
+                self.howManyAttachments = len(post['attachments'])
                 self.post = Post(post)
         except KeyError:
+            self.howManyAttachments = len(post['attachments'])
             self.post = Post(post, attachments=True)
 
     def create_attachments(self):
-        data_to_send = self.post.json_prepare()
+        data_to_send = self.post.json_prepare(howManyAttachments=self.howManyAttachments)
         try:
             if self.repost:
-                data_repost_to_send = self.repost.json_prepare()
+                data_repost_to_send = self.repost.json_prepare(howManyAttachments=self.howManyAttachments)
                 return json.dumps([data_to_send, data_repost_to_send])
         except AttributeError:
-            data_to_send['mrkdwn_in'] = ['text']
-        return json.dumps([data_to_send])
+            for i in range(self.howManyAttachments):
+                data_to_send[i]['mrkdwn_in'] = ['text']
+        return json.dumps([data_to_send][0])
 
     @staticmethod
     def send_message(auth, channel, text, attachments=None, as_user=True):
@@ -60,21 +63,23 @@ class Post(object):
         self.text = post['text']
         self.ts = post['date']
         self.color = '#0093DA'
-        self.footer = 'Lambda'
-        self.footer_icon = 'http://lambda-it.ru/static/img/lambda_logo_mid.png'
+        self.footer, self.footer_icon = self.get_footer(post)
+        self.image_url=[]
+        self.thumb_url=[]
         if attachments:
-            try:
-                if post['attachments']:
-                    self.image_url, self.thumb_url = self.get_image(
-                        post['attachments'])
-            except KeyError:
-                self.image_url, self.thumb_url = None, None
+            for i in post['attachments']:
+                try:
+                        new_image_url, new_thumb_url = self.get_image(
+                            i)
+                        self.image_url.append(new_image_url)
+                        self.thumb_url.append(new_thumb_url)
+                except KeyError:
+                    self.image_url, self.thumb_url = None, None
         else:
             self.image_url, self.thumb_url = None, None
 
     @staticmethod
-    def get_image(attachments):
-        for attachment in attachments:
+    def get_image(attachment):
             if attachment['type'] == 'photo':
                 image = attachment['photo']
                 try:
@@ -89,33 +94,6 @@ class Post(object):
             else:
                 return None, None
 
-    def json_prepare(self):
-        return {
-            'fallback':    '',
-            'color':       self.color,
-            'text':        self.text,
-            'ts':          self.ts,
-            'footer':      self.footer,
-            'footer_icon': self.footer_icon,
-            'image_url':   self.image_url,
-            'thumb_url':   self.thumb_url,
-        }
-
-
-class Repost(Post):
-    def __init__(self, repost):
-        Post.__init__(self, post=repost)
-        self.text = repost['text']
-        self.ts = repost['date']
-        self.color = '#1C6047'
-        self.footer, self.footer_icon = self.get_footer(repost)
-        try:
-            if repost['attachments']:
-                self.image_url, self.thumb_url = self.get_image(
-                    repost['attachments'])
-        except KeyError:
-            self.image_url, self.thumb_url = None, None
-
     @staticmethod
     def get_footer(post):
         if post['owner_id'] < 0:
@@ -126,3 +104,40 @@ class Repost(Post):
             author = User(id=post['owner_id'])
             footer, footer_icon = author.footer()
             return footer, footer_icon
+
+    def json_prepare(self,howManyAttachments):
+        items=[]
+        for i in range(howManyAttachments):
+            items.append(
+                {
+                    'fallback':    '',
+                    'color':       self.color,
+                    'text':        self.text,
+                    'ts':          self.ts,
+                    'footer':      self.footer,
+                    'footer_icon': self.footer_icon,
+                    'image_url':   self.image_url[i],
+                    'thumb_url':   self.thumb_url[i],
+                }
+            )
+
+        return items
+
+
+class Repost(Post):
+    def __init__(self, repost):
+        Post.__init__(self, post=repost)
+        self.text = repost['text']
+        self.ts = repost['date']
+        self.color = '#1C6047'
+        self.footer, self.footer_icon = self.get_footer(repost)
+        self.image_url=[]
+        self.thumb_url=[]
+        try:
+            for i in repost['attachments']:
+                new_image_url, new_thumb_url = self.get_image(
+                    i)
+                self.image_url.append(new_image_url)
+                self.thumb_url.append(new_thumb_url)
+        except KeyError:
+            self.image_url, self.thumb_url = None, None
