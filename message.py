@@ -4,6 +4,9 @@ from auth import auth_vk
 
 vk = auth_vk()
 
+#show all information within message header only
+MESSAGE_HEADER_ID = 0
+
 
 class User(object):
     def __init__(self, id):
@@ -33,20 +36,32 @@ class Slack(object):
         try:
             if post['copy_history']:
                 self.repost = Repost(post['copy_history'][0])
-                self.howManyAttachments = len(post['attachments'])
                 self.post = Post(post)
+                try:
+                    self.repost.howManyAttachments = len(post['copy_history'][0]['attachments'])
+                except Exception:
+                    self.repost.howManyAttachments = 0
+                try:
+                    self.post.howManyAttachments=len(post['attachments'])
+                except Exception:
+                    self.post.howManyAttachments=0
         except KeyError:
-            self.howManyAttachments = len(post['attachments'])
-            self.post = Post(post, attachments=True)
+            self.post = Post(post)
+            try:
+                self.post.howManyAttachments = len(post['attachments'])
+            except Exception:
+                self.post.howManyAttachments = 0
 
     def create_attachments(self):
-        data_to_send = self.post.json_prepare(howManyAttachments=self.howManyAttachments)
+        data_to_send = self.post.json_prepare()
         try:
             if self.repost:
-                data_repost_to_send = self.repost.json_prepare(howManyAttachments=self.howManyAttachments)
-                return json.dumps([data_to_send, data_repost_to_send])
+                data_repost_to_send = self.repost.json_prepare()
+                for i in data_repost_to_send:
+                    data_to_send.append(i)
+                return json.dumps([data_to_send][0])
         except AttributeError:
-            for i in range(self.howManyAttachments):
+            for i in range(self.post.howManyAttachments):
                 data_to_send[i]['mrkdwn_in'] = ['text']
         return json.dumps([data_to_send][0])
 
@@ -59,14 +74,15 @@ class Slack(object):
 
 
 class Post(object):
-    def __init__(self, post, attachments=None):
+    def __init__(self, post):
         self.text = post['text']
         self.ts = post['date']
         self.color = '#0093DA'
         self.footer, self.footer_icon = self.get_footer(post)
         self.image_url=[]
         self.thumb_url=[]
-        if attachments:
+        self.howManyAttachments=0
+        try:
             for i in post['attachments']:
                 try:
                         new_image_url, new_thumb_url = self.get_image(
@@ -74,9 +90,9 @@ class Post(object):
                         self.image_url.append(new_image_url)
                         self.thumb_url.append(new_thumb_url)
                 except KeyError:
-                    self.image_url, self.thumb_url = None, None
-        else:
-            self.image_url, self.thumb_url = None, None
+                    self.image_url, self.thumb_url = [''], ['']
+        except KeyError:
+            self.image_url, self.thumb_url = [''], ['']
 
     @staticmethod
     def get_image(attachment):
@@ -104,23 +120,24 @@ class Post(object):
             author = User(id=post['owner_id'])
             footer, footer_icon = author.footer()
             return footer, footer_icon
-
-    def json_prepare(self,howManyAttachments):
+    #FIXME Разделить кол-во аттачментов к посту и к репосту
+    def json_prepare(self):
         items=[]
-        for i in range(howManyAttachments):
+        if self.howManyAttachments==0: #if only text in message
+            self.howManyAttachments=1  #handle it
+        for i in range(self.howManyAttachments):
             items.append(
                 {
                     'fallback':    '',
                     'color':       self.color,
-                    'text':        self.text,
-                    'ts':          self.ts,
-                    'footer':      self.footer,
-                    'footer_icon': self.footer_icon,
+                    'text':        (lambda x: self.text if i==MESSAGE_HEADER_ID else '')(i),
+                    'ts':          (lambda x: self.ts if i==MESSAGE_HEADER_ID else 0)(i),
+                    'footer':      (lambda x: self.footer if i==MESSAGE_HEADER_ID else '')(i),
+                    'footer_icon': (lambda x: self.footer_icon if i==MESSAGE_HEADER_ID else '')(i),
                     'image_url':   self.image_url[i],
-                    'thumb_url':   self.thumb_url[i],
+                    'thumb_url':   self.thumb_url[i]
                 }
             )
-
         return items
 
 
@@ -133,11 +150,15 @@ class Repost(Post):
         self.footer, self.footer_icon = self.get_footer(repost)
         self.image_url=[]
         self.thumb_url=[]
+        self.howManyAttachments=0
         try:
             for i in repost['attachments']:
-                new_image_url, new_thumb_url = self.get_image(
-                    i)
-                self.image_url.append(new_image_url)
-                self.thumb_url.append(new_thumb_url)
+                try:
+                        new_image_url, new_thumb_url = self.get_image(
+                            i)
+                        self.image_url.append(new_image_url)
+                        self.thumb_url.append(new_thumb_url)
+                except KeyError:
+                    self.image_url, self.thumb_url = [''], ['']
         except KeyError:
-            self.image_url, self.thumb_url = None, None
+            self.image_url, self.thumb_url = [''], ['']
